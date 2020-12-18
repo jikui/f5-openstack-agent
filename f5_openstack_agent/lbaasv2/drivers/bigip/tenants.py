@@ -56,6 +56,7 @@ class BigipTenantManager(object):
         traffic_group = self.driver.service_to_traffic_group(service)
         traffic_group = '/Common/' + traffic_group
         service["traffic_group"] = traffic_group  # modify the passed dict
+        qos_value = service.get('qos','')
 
         # create tenant folder
         folder_name = self.service_adapter.get_folder_name(tenant_id)
@@ -113,7 +114,7 @@ class BigipTenantManager(object):
                             self.network_helper.create_route_domain(
                                 standby_bigip,
                                 rd_id,
-                                service['qos'],
+                                qos_value,
                                 folder_name,
                                 self.conf.f5_route_domain_strictness
                             )
@@ -136,7 +137,7 @@ class BigipTenantManager(object):
                         self.network_helper.create_route_domain(
                             bigip,
                             rd_id,
-                            service['qos'],
+                            qos_value,
                             folder_name,
                             self.conf.f5_route_domain_strictness)
                     except Exception as err:
@@ -150,7 +151,7 @@ class BigipTenantManager(object):
                         payload = self.network_helper.route_domain_update
                         payload['name'] = folder_name
                         payload['partition'] = folder_name
-                        bwc_profile = service['qos']
+                        bwc_profile = qos_value
                         if not bwc_profile.strip():
                             bwc_profile = 'None'
                         LOG.debug(" bwc profile is %s " % bwc_profile)

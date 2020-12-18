@@ -225,6 +225,7 @@ class NetworkServiceBuilder(object):
     def _annotate_service_route_domains(self, service):
         # Add route domain notation to pool member and vip addresses.
         tenant_id = service['loadbalancer']['tenant_id']
+        qos_value = service.get('qos', '')
         self.update_rds_cache(tenant_id)
         if 'members' in service:
             for member in service['members']:
@@ -244,7 +245,7 @@ class NetworkServiceBuilder(object):
                         if member_network:
                             self.assign_route_domain(
                                 tenant_id, member_network, member_subnet,
-                                service['qos'])
+                                qos_value)
                             rd_id = (
                                 '%' + str(member_network['route_domain_id'])
                             )
@@ -259,7 +260,7 @@ class NetworkServiceBuilder(object):
                 vip_subnet = self.service_adapter.get_subnet_from_service(
                     service, loadbalancer['vip_subnet_id'])
                 self.assign_route_domain(
-                    tenant_id, lb_network, vip_subnet, service['qos'])
+                    tenant_id, lb_network, vip_subnet, qos_value)
                 rd_id = '%' + str(lb_network['route_domain_id'])
                 service['loadbalancer']['vip_address'] += rd_id
             else:
