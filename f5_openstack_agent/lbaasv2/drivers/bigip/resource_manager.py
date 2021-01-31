@@ -507,6 +507,15 @@ class ListenerManager(ResourceManager):
         if old_listener['default_pool_id'] != listener['default_pool_id']:
             payload['persist'] = create_payload['persist']
 
+        return super(ListenerManager, self)._update_payload(
+            old_listener, listener, service,
+            payload=payload, create_payload=create_payload
+        )
+
+    def _check_tls_changed(self, old_listener, listener):
+        if not old_listener:
+            return False
+
         if listener['protocol'] == "TERMINATED_HTTPS":
             LOG.debug("Finding tls setting  differences.")
             old_sni = [n['tls_container_id']
@@ -515,8 +524,8 @@ class ListenerManager(ResourceManager):
                    for n in listener['sni_containers']]
             if old_listener['default_tls_container_id'] != \
                listener['default_tls_container_id'] or old_sni != sni:
-                payload['tls'] = "tls change"
                 LOG.debug("tls changes happen")
+                return True
 
             # If client authentication setting changes,
             # also need to update client ssl profile.
@@ -525,19 +534,19 @@ class ListenerManager(ResourceManager):
             old_ca = old_listener.get('ca_container_id', "")
             new_ca = listener.get('ca_container_id', "")
             if old_mode != new_mode or old_ca != new_ca:
-                payload['tls'] = "tls change"
+                return True
+        return False
 
+    def _check_customized_changed(self, old_listener, listener):
+        if not old_listener:
+            return False
         if listener['protocol'] == "HTTP" or \
            listener['protocol'] == "TERMINATED_HTTPS":
             old_customized = old_listener.get('customized', None)
             new_customized = listener.get('customized', None)
             if old_customized != new_customized:
-                payload['customized'] = 'customized change'
-
-        return super(ListenerManager, self)._update_payload(
-            old_listener, listener, service,
-            payload=payload, create_payload=create_payload
-        )
+                return True
+        return False
 
     def _create_persist_profile(self, bigip, vs, persist):
         persist_type = persist.get('type', "")
@@ -760,7 +769,7 @@ class ListenerManager(ResourceManager):
     def _update(self, bigip, vs, old_listener, listener, service):
         # Add conditions here for more update requests via vs['profiles']
         orig_profiles = []
-        if 'tls' in vs:
+        if self._check_tls_changed(old_listener, listener) is True:
             orig_profiles = self.__get_profiles_from_bigip(bigip, vs)
             if 'profiles' not in vs:
                 vs['profiles'] = list()
@@ -782,7 +791,7 @@ class ListenerManager(ResourceManager):
             profile = self._create_persist_profile(bigip, vs, persist)
             vs['persist'] = [{"name": profile}]
 
-        if vs.get('customized', None):
+        if self._check_customized_changed(old_listener, listener) is True:
             self._create_http_profile(bigip, listener, vs)
             # load the porfiles from bigip if needed
             if not orig_profiles:
@@ -825,7 +834,8 @@ class ListenerManager(ResourceManager):
         super(ListenerManager, self)._update(bigip, vs, old_listener, listener,
                                              service)
 
-        if 'tls' in vs and old_listener:
+        if old_listener and \
+           self._check_tls_changed(old_listener, listener) is True:
             old_service = {"listener": old_listener}
             self._delete_ssl_profiles(bigip, vs, old_service)
 
@@ -854,8 +864,29 @@ class ListenerManager(ResourceManager):
     @serialized('ListenerManager.update')
     @log_helpers.log_method_call
     def update(self, old_listener, listener, service, **kwargs):
-        super(ListenerManager, self).update(
-            old_listener, listener, service)
+        if not service.get(self._key):
+            self._search_element(listener, service)
+        payload = kwargs.get("payload",
+                             self._update_payload(old_listener, listener,
+                                                  service))
+
+        if not payload or len(payload.keys()) == 0:
+            if self._check_customized_changed(old_listener, listener) \
+               is False and \
+               self._check_tls_changed(old_listener, listener) is False:
+                LOG.debug("Do not need to update %s", self._resource)
+                return
+
+        if not payload.get("name") or not payload.get("partition"):
+            create_payload = self._create_payload(listener, service)
+            payload['name'] = create_payload['name']
+            payload['partition'] = create_payload['partition']
+
+        LOG.debug("%s payload is %s", self._resource, payload)
+        bigips = self.driver.get_config_bigips(no_bigip_exception=True)
+        for bigip in bigips:
+            self._update(bigip, payload, old_listener, listener, service)
+        LOG.debug("Finish to update %s %s", self._resource, payload['name'])
 
     @serialized('ListenerManager.delete')
     @log_helpers.log_method_call
